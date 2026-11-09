@@ -1,0 +1,45 @@
+availability-baseline.txt
+
+El baseline representa el punto de partida o el estado inicial de la aplicación antes de que se le agregara cualquier mecanismo de protección contra fallas. En este punto, el sistema opera de manera completamente directa y desprotegida frente a cualquier problema que pueda presentar la base de datos o los servicios externos de los cuales depende. Cuando la base de datos sufre de lentitud o se cae por completo, la aplicación no cuenta con ninguna herramienta para gestionar esa situación de forma inteligente. Cada vez que un usuario realiza una petición que requiere consultar información, el sistema se queda esperando o termina fallando de golpe, devolviendo un error general de servidor (como el código 500) que se le muestra directamente al usuario final. Además, en este estado base no existen los reintentos automáticos. Si ocurre una pequeña inestabilidad en la red o un retraso de milisegundos, la solicitud se da por perdida al instante, sin que el sistema intente conectarse de nuevo por sí mismo para salvar la operación. Tampoco hay límites de tiempo configurados, por lo que si la base de datos se llega a congelar, las peticiones de los usuarios se quedan colgadas consumiendo los recursos del servidor de manera indefinida, lo que puede provocar que toda la aplicación colapse.
+
+Tomando como ejemplo la línea 02 200 0.021915 {"status":"SUCCESS","data":["Product A","Product B","Product C"]}, su estructura general se desglosa de la siguiente manera:
+
+02 (ID de la petición): El número de secuencia que identifica el orden de la solicitud (en este caso, la segunda petición).
+
+200 (Código HTTP): Indica que la petición se completó de manera exitosa a nivel de comunicación.
+
+0.021915 (Tiempo de respuesta): La latencia exacta en segundos que tardó el sistema en procesar la solicitud (al ser muy bajo, muestra que fue una respuesta inmediata).
+
+{"status":"SUCCESS", ...} (Cuerpo de la respuesta en formato JSON): Detalla el resultado operativo:
+
+status: SUCCESS: Muestra que la operación se realizó con éxito total en la base de datos principal.
+
+data: Contiene la información obtenida en tiempo real (Product A, Product B, Product C).
+
+En el archivo log el resultado fue:
+136 SUCCESS (68%) y 64 HTTP 500 (32%). Disponibilidad 0.68.
+
+
+
+resilience-sample Timeout.txt
+Se añadieron las reglas básicas de tiempo límite y reintentos para manejar las fallas de comunicación con la base de datos principal. Por un lado, se encuentran las peticiones exitosas, las cuales fluyen con normalidad y responden en cuestión de milisegundos porque la base de datos está disponible y no presenta problemas de latencia. Por otro lado, se encuentra el comportamiento cuando la base de datos falla o tarda demasiado en responder. En esos casos, el sistema entra en acción intentando reconectarse de manera automática un número determinado de veces. Si los intentos se agotan sin éxito, la aplicación finalmente se rinde y devuelve un error de servidor, un proceso que toma un poco más de tiempo debido a los ciclos de espera de los reintentos.
+
+Como resultado tenemos 74 SUCCESS (37%) y 126 HTTP 500 (63%). La disponibilidad bajó a 0.37, lo cual coincide con el 60% de fallas configurado.
+
+En cuanto al bloque de éxitos la solicitud no fue marcada para fallar y respondió en el intento 1. La número uno tardó 0.227 s por el “calentamiento” de la aplicación.
+
+Con el bloque de errores el tiempo cuadra con la suma de los 3 intentos y ya no hay ninguna respuesta de 3 s así que el Timeout funcionó.
+
+
+
+resilience-sample Fallback.txt
+Se añadio el patrón de respaldo, cuyo propósito principal es evitar que el usuario final reciba una pantalla de error cuando la base de datos principal deja de funcionar. Cuando el sistema opera con normalidad, las consultas se atienden directamente en tiempo real y devuelven la información fresca tal como se espera pero cuando ocurre un fallo o un retraso excesivo en la consulta principal, el mecanismo de respaldo se activa de forma transparente para el usuario. En lugar de bloquear la operación o arrojar una falla, el sistema responde entregando una alternativa basada en información guardada previamente en caché. De esta manera, aunque el servicio principal esté caído, la aplicación se mantiene disponible y funcional.
+
+Se obtuvo 76 SUCCESS (38%), 124 DEGRADED_CACHE (62%), 0 errores y disponibilidad 1.00 (100%).
+
+
+
+resilience-sample Circuit Breaker.txt
+Al último se implemento un mecanismo diseñado para proteger a la aplicación y a la base de datos de sufrir una saturación cuando existen problemas graves. En los momentos donde se acumulan múltiples fallos consecutivos, el circuito se abre para evitar que sigan fluyendo peticiones inútiles hacia la base de datos dañada, redirigiendo todo el tráfico de inmediato hacia las respuestas de respaldo. Conforme pasa el tiempo, el sistema comienza a realizar pequeñas pruebas para verificar si la base de datos ya se ha recuperado. En cuanto detecta que el servicio principal vuelve a responder correctamente, el circuito se cierra de nuevo y permite que las peticiones normales fluyan otra vez, combinando la operación habitual con algunas respuestas en caché según el comportamiento del entorno.
+
+Los resultado dieron 76 SUCCESS (38%), 124 DEGRADED_CACHE (62%), 0 errores y disponibilidad 1.00 (100%).
